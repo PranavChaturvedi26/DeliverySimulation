@@ -109,3 +109,5 @@ test-results.xml
 
 # Vite
 .vite/
+
+.claude/
