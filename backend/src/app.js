@@ -7,6 +7,7 @@ const Driver = require("./models/Driver");
 const Route = require("./models/Route");
 const Order = require("./models/Order");
 const cookieParser = require('cookie-parser');
+const redisClient = require('./config/redis');
 
 dotenv.config();
 
@@ -29,6 +30,16 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization', 'Cookie'],
 }));
 app.use(express.json());
+
+const initializeRedis = async () => {
+    try {
+        await redisClient.connect();
+        console.log('Redis initialized successfully');
+    } catch (error) {
+        console.error('Redis initialization failed:', error.message);
+        console.log('Application will continue without Redis caching');
+    }
+};
 
 const seedData = async () => {
     try {
@@ -87,3 +98,4 @@ app.use((err, req, res, next) => {
 
 module.exports = app;
 module.exports.seedData = seedData;
+module.exports.initializeRedis = initializeRedis;

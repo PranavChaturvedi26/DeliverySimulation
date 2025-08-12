@@ -1,11 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { protect } = require("../middleware/authMiddleware");
-const { runSimulation, getLatestSimulation, getAllSimulations } = require("../controllers/simulationController");
+const { runSimulation, getLatestSimulation, getAllSimulations, getCacheStats, clearCache } = require("../controllers/simulationController");
 
 router.post("/", protect, runSimulation);
 router.get("/", protect, getAllSimulations);
 router.get("/latest", protect, getLatestSimulation);
+router.get("/cache/stats", protect, getCacheStats);
+router.post("/cache/clear", protect, clearCache);
 
 // Add route to create sample data for testing
 router.post("/sample", protect, async (req, res) => {

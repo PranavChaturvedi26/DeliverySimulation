@@ -3,8 +3,7 @@ const Simulation = require("../models/Simulation");
 const Driver = require("../models/Driver");
 const Route = require("../models/Route");
 const Order = require("../models/Order");
-
-
+const cacheService = require("../utils/cacheService");
 
 const runSimulation = asyncHandler(async (req, res) => {
     const { numDrivers, startTime, maxHoursPerDriver } = req.body;
@@ -18,6 +17,22 @@ const runSimulation = asyncHandler(async (req, res) => {
     ) {
         res.status(400);
         throw new Error("Invalid simulation inputs");
+    }
+
+    const simulationParams = {
+        numDrivers,
+        startTime: new Date(startTime).toISOString(),
+        maxHoursPerDriver
+    };
+
+    const cachedResult = await cacheService.getCachedSimulation(simulationParams);
+    if (cachedResult) {
+        console.log('Returning cached simulation result');
+        return res.status(200).json({
+            ...cachedResult.data,
+            fromCache: true,
+            cacheKey: cachedResult.cacheKey
+        });
     }
 
     const drivers = await Driver.find().limit(numDrivers);
@@ -127,30 +142,133 @@ const runSimulation = asyncHandler(async (req, res) => {
         fuelCost: fuelCostTotal,
     });
 
-    res.status(201).json(simulation);
+    const result = {
+        ...simulation.toObject(),
+        fromCache: false
+    };
+
+    const cacheResult = await cacheService.setCachedSimulation(simulationParams, result);
+    if (cacheResult.success) {
+        console.log(`Simulation result cached with key: ${cacheResult.cacheKey}`);
+    }
+
+    res.status(201).json(result);
 });
 
 const getLatestSimulation = asyncHandler(async (req, res) => {
+    const cachedResult = await cacheService.getCachedList('latest-simulation');
+    if (cachedResult) {
+        console.log('Returning cached latest simulation');
+        return res.json({
+            ...cachedResult.data,
+            fromCache: true
+        });
+    }
+
     const latestSim = await Simulation.findOne().sort({ createdAt: -1 });
 
-    // If no simulations exist, return null - don't create sample data
     if (!latestSim) {
         return res.json(null);
     }
 
-    res.json(latestSim);
+    const result = {
+        ...latestSim.toObject(),
+        fromCache: false
+    };
+
+    await cacheService.setCachedList('latest-simulation', {}, result);
+
+    res.json(result);
 });
 
 const getAllSimulations = async (req, res) => {
     try {
-        const simulations = await Simulation.find({})
-            .sort({ createdAt: -1 }); // newest first
+        const page = parseInt(req.query.page) || 1;
+        const limit = parseInt(req.query.limit) || 10;
+        const sortBy = req.query.sortBy || 'createdAt';
+        const sortOrder = req.query.sortOrder === 'asc' ? 1 : -1;
 
-        // Don't create sample data here - only getLatestSimulation should do that
-        res.json(simulations);
+        const cacheQuery = { page, limit, sortBy, sortOrder };
+        const cachedResult = await cacheService.getCachedList('simulations', cacheQuery);
+        
+        if (cachedResult) {
+            console.log('Returning cached simulations list');
+            return res.json({
+                ...cachedResult.data,
+                fromCache: true
+            });
+        }
+
+        const skip = (page - 1) * limit;
+        const sortOptions = {};
+        sortOptions[sortBy] = sortOrder;
+
+        const simulations = await Simulation.find({})
+            .sort(sortOptions)
+            .skip(skip)
+            .limit(limit);
+
+        const total = await Simulation.countDocuments();
+        const totalPages = Math.ceil(total / limit);
+
+        const result = {
+            simulations,
+            pagination: {
+                currentPage: page,
+                totalPages,
+                totalItems: total,
+                itemsPerPage: limit,
+                hasNextPage: page < totalPages,
+                hasPrevPage: page > 1
+            },
+            fromCache: false
+        };
+
+        await cacheService.setCachedList('simulations', cacheQuery, result);
+
+        res.json(result);
     } catch (error) {
+        console.error('Error fetching simulations:', error);
         res.status(500).json({ message: "Failed to fetch simulations" });
     }
 };
 
-module.exports = { runSimulation, getLatestSimulation, getAllSimulations };
+const getCacheStats = asyncHandler(async (req, res) => {
+    const stats = await cacheService.getCacheStats();
+    res.json(stats);
+});
+
+const clearCache = asyncHandler(async (req, res) => {
+    const { type } = req.body;
+    
+    let success = false;
+    let message = '';
+
+    switch (type) {
+        case 'simulations':
+            success = await cacheService.invalidateSimulationCache();
+            message = success ? 'Simulation cache cleared successfully' : 'Failed to clear simulation cache';
+            break;
+        case 'lists':
+            success = await cacheService.invalidateListCache('simulations');
+            await cacheService.invalidateListCache('latest-simulation');
+            message = success ? 'List cache cleared successfully' : 'Failed to clear list cache';
+            break;
+        case 'all':
+            success = await cacheService.clearAllCache();
+            message = success ? 'All cache cleared successfully' : 'Failed to clear all cache';
+            break;
+        default:
+            return res.status(400).json({ message: 'Invalid cache type. Use: simulations, lists, or all' });
+    }
+
+    res.json({ success, message });
+});
+
+module.exports = { 
+    runSimulation, 
+    getLatestSimulation, 
+    getAllSimulations, 
+    getCacheStats, 
+    clearCache 
+};

@@ -1,0 +1,17 @@
+# Override file for development environment
+version: '3.8'
+
+services:
+  backend:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./backend:/app
+      - /app/node_modules
+    
+  frontend:
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
